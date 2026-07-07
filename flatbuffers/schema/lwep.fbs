@@ -1,0 +1,68 @@
+// LWEP neutral schema - FlatBuffers.
+//
+// This single file is consumed by BOTH:
+//   * the FlatBuffers runtime (Python, Java) via `flatc`
+//   * FlatCC (C, no dynamic allocation on the read path) via `flatcc`
+//
+// FlatBuffers has exact-width scalars (byte/ubyte/short/ushort/int/uint/long/
+// ulong), so the "logical" widths from ../../messages/ map directly here.
+//
+// No `root_type` is declared: all four top-level tables are meant to be used as
+// independent root buffers (each generated class gets its own GetRootAs* /
+// *_start_as_root), selected at runtime by the framing msg_type.
+
+namespace lwep;
+
+// ---- 01 SensorReading : scalar data types -------------------------------
+enum SensorType : byte {
+  UNKNOWN = 0,
+  TEMPERATURE = 1,
+  PRESSURE = 2,
+  HUMIDITY = 3,
+  VOLTAGE = 4,
+}
+
+table SensorReading {
+  id:            ushort;
+  sensor_type:   SensorType;
+  value:         float;
+  value_precise: double;
+  timestamp:     ulong;
+  is_valid:      bool;
+  raw_count:     int;
+  label:         string;
+}
+
+// ---- 02 Waveform : vectors / fixed-max arrays ---------------------------
+table Waveform {
+  channel:  ubyte;
+  samples:  [short];
+  gains:    [float];
+  tags:     [string];
+  checksum: uint;
+}
+
+// ---- 03 DeviceStatus : packed bitfield ----------------------------------
+table DeviceStatus {
+  device_id:  ushort;
+  flags:      uint;    // packed bitfield, layout in messages/03-bitfields.md
+  error_code: ubyte;
+}
+
+// ---- 04 TelemetryPacket : everything nested -----------------------------
+// struct = fixed inline layout (ideal for a preamble). Fields are ordered
+// largest-alignment-first (uint, ushort, ubyte) so there is no internal padding.
+struct PacketHeader {
+  seq:         uint;
+  source_addr: ushort;
+  version:     ubyte;
+}
+
+table TelemetryPacket {
+  header:         PacketHeader;   // inline struct
+  reading:        SensorReading;
+  waveform:       Waveform;
+  status:         DeviceStatus;
+  extra_readings: [SensorReading];
+  payload:        [ubyte];
+}
