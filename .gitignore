@@ -1,0 +1,42 @@
+# Only the neutral schema files (*.proto, *.options, *.fbs) and hand-written
+# harness code (*.py, *.cpp, Makefile, *.ps1, *.md) are version controlled.
+# Everything generated or built is ignored.
+
+# ---- protobuf / nanopb generated ----
+*_pb2.py
+*.pb.c
+*.pb.h
+*.pb            # protoc FileDescriptorSet intermediate
+
+# ---- flatbuffers / flatcc generated ----
+# Python package produced by `flatc --python -o .`
+flatbuffers/python/lwep/
+protobuf/python/lwep/
+lwep_reader.h
+lwep_builder.h
+lwep_verifier.h
+lwep_common.h
+flatbuffers_common_reader.h
+flatbuffers_common_builder.h
+
+# ---- Java generated ----
+protobuf/java/lwep/
+flatbuffers/java/lwep/
+*.class
+
+# ---- build artifacts ----
+build/
+*.o
+*.obj
+*.exe
+main
+sensor.bin
+
+# ---- python caches ----
+__pycache__/
+*.pyc
+
+# ---- third_party ----
+# nanopb and flatcc are git SUBMODULES (pinned to release tags) — tracked, not ignored.
+# Only the downloaded Java jars and any local flatcc build output are ignored.
+/third_party/jars/
