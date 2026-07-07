@@ -1,0 +1,65 @@
+// LWEP neutral schema - Protocol Buffers (proto3).
+//
+// This single file is consumed by BOTH:
+//   * the protobuf runtime (Python, Java) via `protoc`
+//   * nanopb (C, no dynamic allocation) via `nanopb_generator`, which also reads
+//     the sibling `lwep.options` file to pin static array/string sizes.
+//
+// See ../../messages/ for the neutral, human-readable message catalog and the
+// meaning of the "logical" integer widths (protobuf has no 8/16-bit scalars).
+
+syntax = "proto3";
+
+package lwep;
+
+// ---- 01 SensorReading : scalar data types -------------------------------
+enum SensorType {
+  SENSOR_UNKNOWN = 0;
+  TEMPERATURE    = 1;
+  PRESSURE       = 2;
+  HUMIDITY       = 3;
+  VOLTAGE        = 4;
+}
+
+message SensorReading {
+  uint32     id            = 1;   // logical uint16
+  SensorType sensor_type   = 2;
+  float      value         = 3;
+  double     value_precise = 4;
+  uint64     timestamp     = 5;
+  bool       is_valid      = 6;
+  int32      raw_count     = 7;
+  string     label         = 8;   // max 16 bytes (see lwep.options)
+}
+
+// ---- 02 Waveform : vectors / fixed-max arrays ---------------------------
+message Waveform {
+  uint32          channel  = 1;   // logical uint8
+  repeated sint32 samples  = 2;   // logical int16, zig-zag encoded; max 64
+  repeated float  gains    = 3;   // max 4
+  repeated string tags     = 4;   // max 8, each <= 12 bytes
+  uint32          checksum = 5;
+}
+
+// ---- 03 DeviceStatus : packed bitfield ----------------------------------
+message DeviceStatus {
+  uint32 device_id  = 1;   // logical uint16
+  uint32 flags      = 2;   // packed bitfield, layout in messages/03-bitfields.md
+  uint32 error_code = 3;   // logical uint8
+}
+
+// ---- 04 TelemetryPacket : everything nested -----------------------------
+message PacketHeader {
+  uint32 version     = 1;   // logical uint8
+  uint32 seq         = 2;
+  uint32 source_addr = 3;   // logical uint16
+}
+
+message TelemetryPacket {
+  PacketHeader           header         = 1;
+  SensorReading          reading        = 2;
+  Waveform               waveform       = 3;
+  DeviceStatus           status         = 4;
+  repeated SensorReading extra_readings = 5;   // nested vector of messages; max 4
+  bytes                  payload        = 6;   // max 32 bytes
+}

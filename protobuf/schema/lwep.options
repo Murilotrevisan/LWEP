@@ -1,0 +1,37 @@
+# nanopb options for lwep.proto
+#
+# This file is read by nanopb_generator (NOT by protoc / the protobuf runtime).
+# It pins every variable-length field to a fixed maximum so the generated C
+# structs use plain static arrays with NO dynamic memory allocation - the core
+# requirement for running on a microcontroller.
+#
+# Field names are FULLY QUALIFIED with the proto package (`package lwep;`), i.e.
+# "lwep.<Message>.<field>". Without the "lwep." prefix nanopb silently fails to
+# match and falls back to pb_callback_t (dynamic) fields.
+#
+# Syntax: "<pattern>  option:value option:value ..."
+# Docs:  https://jpa.kapsi.fi/nanopb/docs/reference.html#generator-options
+
+# ---- SensorReading ------------------------------------------------------
+lwep.SensorReading.id            int_size:IS_16
+lwep.SensorReading.label         max_size:16
+
+# ---- Waveform -----------------------------------------------------------
+lwep.Waveform.channel            int_size:IS_8
+lwep.Waveform.samples            int_size:IS_16   max_count:64
+lwep.Waveform.gains              max_count:4
+lwep.Waveform.tags               max_count:8      max_size:12
+lwep.Waveform.checksum           int_size:IS_32
+
+# ---- DeviceStatus -------------------------------------------------------
+lwep.DeviceStatus.device_id      int_size:IS_16
+lwep.DeviceStatus.flags          int_size:IS_32
+lwep.DeviceStatus.error_code     int_size:IS_8
+
+# ---- PacketHeader -------------------------------------------------------
+lwep.PacketHeader.version        int_size:IS_8
+lwep.PacketHeader.source_addr    int_size:IS_16
+
+# ---- TelemetryPacket ----------------------------------------------------
+lwep.TelemetryPacket.extra_readings  max_count:4
+lwep.TelemetryPacket.payload         max_size:32
