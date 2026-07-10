@@ -295,6 +295,120 @@ static void dump(uint8_t t, const uint8_t *buf, uint32_t len) {
     }
 }
 
+// ---------------------------------------------------------------- re-encode (decode -> rebuild)
+// Read every field out of the received buffer and build a FRESH FlatBuffer, so the
+// server's echo proves the C decode (symmetric with the protobuf server, instead of
+// echoing the buffer back untouched). On x86 (little-endian) the scalar-vector
+// `_create` calls copy the buffer's already-LE data verbatim.
+static void reput_sensor(flatcc_builder_t *B, lwep_SensorReading_table_t r) {
+    lwep_SensorReading_id_add(B, lwep_SensorReading_id(r));
+    lwep_SensorReading_sensor_type_add(B, lwep_SensorReading_sensor_type(r));
+    lwep_SensorReading_value_add(B, lwep_SensorReading_value(r));
+    lwep_SensorReading_value_precise_add(B, lwep_SensorReading_value_precise(r));
+    lwep_SensorReading_timestamp_add(B, lwep_SensorReading_timestamp(r));
+    lwep_SensorReading_is_valid_add(B, lwep_SensorReading_is_valid(r));
+    lwep_SensorReading_raw_count_add(B, lwep_SensorReading_raw_count(r));
+    const char *label = lwep_SensorReading_label(r);
+    lwep_SensorReading_label_create_str(B, label ? label : "");
+}
+static lwep_SensorReading_ref_t reref_sensor(flatcc_builder_t *B, lwep_SensorReading_table_t r) {
+    lwep_SensorReading_start(B);
+    reput_sensor(B, r);
+    return lwep_SensorReading_end(B);
+}
+
+static void reput_waveform(flatcc_builder_t *B, lwep_Waveform_table_t w) {
+    lwep_Waveform_channel_add(B, lwep_Waveform_channel(w));
+    flatbuffers_int16_vec_t sm = lwep_Waveform_samples(w);
+    lwep_Waveform_samples_create(B, sm, flatbuffers_int16_vec_len(sm));
+    flatbuffers_float_vec_t gn = lwep_Waveform_gains(w);
+    lwep_Waveform_gains_create(B, gn, flatbuffers_float_vec_len(gn));
+    flatbuffers_string_vec_t tg = lwep_Waveform_tags(w);
+    lwep_Waveform_tags_start(B);
+    for (size_t i = 0; i < flatbuffers_string_vec_len(tg); i++)
+        lwep_Waveform_tags_push_create_str(B, flatbuffers_string_vec_at(tg, i));
+    lwep_Waveform_tags_end(B);
+    lwep_Waveform_checksum_add(B, lwep_Waveform_checksum(w));
+}
+static lwep_Waveform_ref_t reref_waveform(flatcc_builder_t *B, lwep_Waveform_table_t w) {
+    lwep_Waveform_start(B);
+    reput_waveform(B, w);
+    return lwep_Waveform_end(B);
+}
+
+static void reput_status(flatcc_builder_t *B, lwep_DeviceStatus_table_t d) {
+    lwep_DeviceStatus_device_id_add(B, lwep_DeviceStatus_device_id(d));
+    lwep_DeviceStatus_flags_add(B, lwep_DeviceStatus_flags(d));
+    lwep_DeviceStatus_error_code_add(B, lwep_DeviceStatus_error_code(d));
+}
+static lwep_DeviceStatus_ref_t reref_status(flatcc_builder_t *B, lwep_DeviceStatus_table_t d) {
+    lwep_DeviceStatus_start(B);
+    reput_status(B, d);
+    return lwep_DeviceStatus_end(B);
+}
+
+// Decode `in` and rebuild it as the buffer root; returns re-encoded size (copied
+// into `out`), or 0 on a bad/unknown buffer.
+static uint32_t reencode(uint8_t t, const uint8_t *in, uint32_t len,
+                         flatcc_builder_t *B, uint8_t *out, size_t cap) {
+    flatcc_builder_reset(B);
+    switch (t) {
+        case T_SENSOR:
+            if (lwep_SensorReading_verify_as_root(in, len)) return 0;
+            lwep_SensorReading_start_as_root(B);
+            reput_sensor(B, lwep_SensorReading_as_root(in));
+            lwep_SensorReading_end_as_root(B);
+            break;
+        case T_WAVEFORM:
+            if (lwep_Waveform_verify_as_root(in, len)) return 0;
+            lwep_Waveform_start_as_root(B);
+            reput_waveform(B, lwep_Waveform_as_root(in));
+            lwep_Waveform_end_as_root(B);
+            break;
+        case T_STATUS:
+            if (lwep_DeviceStatus_verify_as_root(in, len)) return 0;
+            lwep_DeviceStatus_start_as_root(B);
+            reput_status(B, lwep_DeviceStatus_as_root(in));
+            lwep_DeviceStatus_end_as_root(B);
+            break;
+        case T_TELEMETRY: {
+            if (lwep_TelemetryPacket_verify_as_root(in, len)) return 0;
+            lwep_TelemetryPacket_table_t tp = lwep_TelemetryPacket_as_root(in);
+            lwep_PacketHeader_struct_t h = lwep_TelemetryPacket_header(tp);
+            lwep_SensorReading_ref_t reading = reref_sensor(B, lwep_TelemetryPacket_reading(tp));
+            lwep_Waveform_ref_t waveform = reref_waveform(B, lwep_TelemetryPacket_waveform(tp));
+            lwep_DeviceStatus_ref_t status = reref_status(B, lwep_TelemetryPacket_status(tp));
+            lwep_SensorReading_vec_t ev = lwep_TelemetryPacket_extra_readings(tp);
+            size_t n = lwep_SensorReading_vec_len(ev);
+            lwep_SensorReading_ref_t erefs[8];
+            if (n > 8) n = 8;
+            for (size_t i = 0; i < n; i++)
+                erefs[i] = reref_sensor(B, lwep_SensorReading_vec_at(ev, i));
+            flatbuffers_uint8_vec_t pl = lwep_TelemetryPacket_payload(tp);
+            lwep_TelemetryPacket_start_as_root(B);
+            lwep_TelemetryPacket_header_create(B, lwep_PacketHeader_seq(h),
+                    lwep_PacketHeader_source_addr(h), lwep_PacketHeader_version(h));
+            lwep_TelemetryPacket_reading_add(B, reading);
+            lwep_TelemetryPacket_waveform_add(B, waveform);
+            lwep_TelemetryPacket_status_add(B, status);
+            lwep_TelemetryPacket_extra_readings_start(B);
+            for (size_t i = 0; i < n; i++)
+                lwep_TelemetryPacket_extra_readings_push(B, erefs[i]);
+            lwep_TelemetryPacket_extra_readings_end(B);
+            lwep_TelemetryPacket_payload_create(B, pl, flatbuffers_uint8_vec_len(pl));
+            lwep_TelemetryPacket_end_as_root(B);
+            break;
+        }
+        default: return 0;
+    }
+    size_t size = flatcc_builder_get_buffer_size(B);
+    if (size > cap || !flatcc_builder_copy_buffer(B, out, cap)) {
+        fprintf(stderr, "reencode/copy failed (size=%zu cap=%zu)\n", size, cap);
+        return 0;
+    }
+    return (uint32_t)size;
+}
+
 // ---------------------------------------------------------------- roles
 static int run_server(int port) {
     sock_t srv = socket(AF_INET, SOCK_STREAM, 0);
@@ -309,18 +423,22 @@ static int run_server(int port) {
     printf("[server] listening on :%d\n", port);
     sock_t c = accept(srv, nullptr, nullptr);
     printf("[server] client connected\n");
-    static uint8_t in[MAX_FRAME];
+    static uint8_t in[MAX_FRAME], out[MAX_FRAME];
+    flatcc_builder_t B;
+    flatcc_builder_init(&B);
     uint8_t t;
     long len;
     int count = 0;
-    // The read path is zero-copy; we echo the verified buffer back unchanged
-    // (a valid FlatBuffer). The Python flatbuffers server demonstrates full
-    // re-encode; here we keep the embedded side minimal.
+    // Decode each received buffer and REBUILD it (decode -> re-encode) before
+    // echoing, mirroring the protobuf server: the echo now proves the C side
+    // decoded exactly what Python encoded, not just a byte passthrough.
     while ((len = recv_frame(c, &t, in, sizeof(in))) >= 0) {
         dump(t, in, (uint32_t)len);
-        if (!send_frame(c, t, in, (uint32_t)len)) break;
+        uint32_t olen = reencode(t, in, (uint32_t)len, &B, out, sizeof(out));
+        if (olen == 0 || !send_frame(c, t, out, olen)) break;
         count++;
     }
+    flatcc_builder_clear(&B);
     printf("[server] done, echoed %d message(s)\n", count);
     CLOSESOCK(c);
     CLOSESOCK(srv);
@@ -360,6 +478,7 @@ static int run_client(const char *host, int port) {
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);  // unbuffered: the GUI streams this stdout live
 #ifdef _WIN32
     WSADATA w;
     WSAStartup(MAKEWORD(2, 2), &w);

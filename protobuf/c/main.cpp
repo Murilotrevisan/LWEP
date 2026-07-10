@@ -326,6 +326,7 @@ static int run_client(const char *host, int port) {
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);  // unbuffered: the GUI streams this stdout live
 #ifdef _WIN32
     WSADATA w;
     WSAStartup(MAKEWORD(2, 2), &w);
